@@ -1,5 +1,4 @@
-/*  Version 5.1 METAR Decoder and display for ESp8266/ESP32 and ILI9341 TFT screen
- *   Improved WiFi connection reliability with the M5-Stack
+/*  Version 6 METAR Decoder and display for ESP8266/ESP32 and ILI9341 TFT screen
  *   
  This software, the ideas and concepts is Copyright (c) David Bird 2018. All rights to this software are reserved.
  
@@ -20,13 +19,42 @@
  *
 */
 ////////////////////////////////////////////////////////////////////////////////////
-String version_num = "METAR ESP Version 5.1";
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <M5Stack.h>
+String version_num = "METAR ESP Version 6.1";
+#ifdef ESP32
+  #include <WiFi.h>
+  #define CS   17  // ESP32 GPIO 17 goes to TFT CS
+  #define DC   16  // ESP32 GPIO 16 goes to TFT DC
+  #define MOSI 23  // ESP32 GPIO 23 goes to TFT MOSI
+  #define SCLK 18  // ESP32 GPIO 18 goes to TFT SCK/CLK
+  #define RST   5  // ESP32 GPIO  5 ESP RST to TFT RESET
+  #define MISO     // Not connected
+  //      3.3V     // Goes to TFT LED  
+  //      5v       // Goes to TFT Vcc
+  //      Gnd      // Goes to TFT Gnd
+#else
+  // YOU MUST DOWNGRADE YOUR IDE to 2.4.2 for this to work on the ESP8266
+  #include <ESP8266WiFi.h>
+  #define CS   D0 // Wemos D1 Mini D0 goes to TFT CS
+  #define DC   D8 // Wemos D1 Mini D8 goes to TFT DC
+  #define MOSI D7 // Wemos D1 Mini D7 goes to TFT MOSI
+  #define SCLK D5 // Wemos D1 Mini D5 goes to TFT SCK/CLK
+  #define RST     // Wemos D1 Mini RST on ESP goes to TFT RESET
+  #define MISO    // Wemos D1 Mini Not connected
+  //      3.3V    // Goes to TFT LED  
+  //      5v      // Goes to TFT Vcc
+  //      Gnd     // Goes to TFT Gnd 
+#endif
 
-const char *ssid      = "your_SSID";
-const char *password  = "your_PASSWORD";
+#include <WiFiClientSecure.h>
+#include "SPI.h"
+#include "Adafruit_GFX.h"
+#include "Adafruit_ILI9341.h"
+
+// Use hardware SPI (on Uno, #13, #12, #11) and the above for CS/DC
+Adafruit_ILI9341 tft = Adafruit_ILI9341(CS, DC);
+
+const char *ssid      = "your_WiFi_SSID";
+const char *password  = "your_WiFi_PASSWORD";
 const char* host      = "aviationweather.gov";
 const int   httpsPort = 443;
 
@@ -48,10 +76,16 @@ const int diameter = 41;  // Size of the compass
 
 void setup(){
   Serial.begin(115200);
-  M5.begin();
+  tft.begin();
+  tft.setRotation(3);
   clear_screen();
   display_progress("Connecting to Network",25);
-  StartWiFi(ssid, password); 
+  WiFi.begin(ssid, password); 
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(100);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected at: " + WiFi.localIP().toString());
   display_status();
 }
 
@@ -70,7 +104,7 @@ void loop(){
 void GET_METAR(String station, String Name) { //client function to send/receive GET request data.
   String metar         = " ";
   bool metar_status    = false;
-  const int time_delay = 60000; 
+  const int time_delay = 20000; 
   display_item(35,100,"Decoding METAR",GREEN,3);
   display_item(90,135,"for "+station,GREEN,3);
   if (!client.connect(host, httpsPort)) {
@@ -100,7 +134,7 @@ void GET_METAR(String station, String Name) { //client function to send/receive 
   display_item(265,230,"Connected",RED,1);
   display_item(0,230,version_num,GREEN,1);
   display_item(0,190,Name,YELLOW,2);
-  M5.Lcd.drawLine(0,185,320,185,YELLOW);
+  tft.drawLine(0,185,320,185,YELLOW);
   display_item(0,210,metar,YELLOW,1);
   if (metar_status == true) {
     display_metar(metar);
@@ -108,10 +142,10 @@ void GET_METAR(String station, String Name) { //client function to send/receive 
   }
   else
   {
-    display_item(70,100,metar,YELLOW,2); // Now decode METAR which at this point will be 'Station off-air'
-    delay(5000);  // Wait less time if station off-air
+    display_item(70,100,metar,YELLOW,2); // Now decode METAR
+    delay(5000); // Wait less time if station off-air
   }
-  clear_screen(); // Clear screen before moving to next station display
+  clear_screen();     // Clear screen before moving to next station display
 }
 
 void display_metar(String metar) {
@@ -165,7 +199,7 @@ void display_metar(String metar) {
       if (wind_speedMPH >= 18) display_item((centreX-35),(centreY+50),(String(wind_speedMPH)+" MPH"),RED,2);
     }
     if (temp_strA.indexOf('G') >= 0) {
-      M5.Lcd.fillRect(centreX-40,centreY+48,82,18,BLACK);
+      tft.fillRect(centreX-40,centreY+48,82,18,BLACK);
       display_item((centreX-40),(centreY+50),String(wind_speedKTS)+"g"+temp_strA.substring(temp_strA.indexOf('G')+1,temp_strA.indexOf('G')+3)+temp_strB,YELLOW,2);
     }
     int wind_direction = 0;
@@ -233,7 +267,7 @@ void display_metar(String metar) {
       conditions_start = temp_strA.substring(4);
       conditions_start = conditions_start.substring(0,1);
       if (conditions_start == "N" || conditions_start == "S" || conditions_start == "E" || conditions_start == "W") { 
-        M5.Lcd.fillRect(25,20,170,20,BLACK);
+        tft.fillRect(25,20,170,20,BLACK);
         display_item(25,20,"/"+temp_strA+" Mts Visibility",WHITE,1);
       }
       temp_strA = strtok(NULL," ");
@@ -243,7 +277,7 @@ void display_metar(String metar) {
 // Process any reported weather conditions e.g. -RA means light rain
     // Test for cloud reports that conflict with weather condition descriptors and ignore them, test for occassions when there is no Conditions report
     // Ignore any cloud reprts at this stage BKN, CLR, FEW, NCD, OVC, SCT, SKC, or VV///
-    M5.Lcd.drawRect(132,129,188,12,YELLOW);
+    tft.drawRect(132,129,188,12,YELLOW);
     display_item(136,132,"Additional Wx Reports:",WHITE,1);
     conditions_start = temp_strA.substring(0,1);
     temp_strB = temp_strA.substring(0,3);
@@ -297,11 +331,11 @@ void display_metar(String metar) {
     
 //----------------------------------------------------------------------------------------------------
 // Process any reported cloud cover e.g. SCT018 means Scattered clouds at 1800 ft
-    M5.Lcd.drawLine(0,40,229,40,YELLOW);
+    tft.drawLine(0,40,229,40,YELLOW);
     if (temp_strA == "////" || temp_strA == "/////" || temp_strA == "//////")  {
       temp_strA = "No CC Rep.";
       temp_strA = strtok(NULL, " ");
-    } 
+    }
     else
     {
       // BLOCK-1 Process any reported cloud cover e.g. SCT018 means Scattered clouds at 1800 ft
@@ -332,7 +366,7 @@ void display_metar(String metar) {
         temp_strA = strtok(NULL, " ");
       }
     }
-    
+   
 //----------------------------------------------------------------------------------------------------
 // Process any reported temperatures e.g. 14/12 means Temp 14C Dewpoint 12
     // Test first section of temperature/dewpoint which is 'temperature' so either 12/nn or M12/Mnn
@@ -512,22 +546,22 @@ String display_conditions(String WX_state) {
 }
 
 void display_item(int x, int y, String token, int txt_colour, int txt_size) {
-  M5.Lcd.setCursor(x, y);
-  M5.Lcd.setTextColor(txt_colour);
-  M5.Lcd.setTextSize(txt_size);
-  M5.Lcd.print(token);
-  M5.Lcd.setTextSize(2); // Back to default text size
+  tft.setCursor(x, y);
+  tft.setTextColor(txt_colour);
+  tft.setTextSize(txt_size);
+  tft.print(token);
+  tft.setTextSize(2); // Back to default text size
 }
 
 void display_item_nxy(String token, int txt_colour, int txt_size) {
-  M5.Lcd.setTextColor(txt_colour);
-  M5.Lcd.setTextSize(txt_size);
-  M5.Lcd.print(token);
-  M5.Lcd.setTextSize(2); // Back to default text size
+  tft.setTextColor(txt_colour);
+  tft.setTextSize(txt_size);
+  tft.print(token);
+  tft.setTextSize(2); // Back to default text size
 }
 
 void clear_screen() {
-  M5.Lcd.fillScreen(BLACK);
+  tft.fillScreen(BLACK);
 }  
 
 void arrow(int x1, int y1, int x2, int y2, int alength, int awidth, int colour) {
@@ -544,11 +578,11 @@ void arrow(int x1, int y1, int x2, int y2, int alength, int awidth, int colour) 
   //
   x4 = dx - y2o * k;
   y4 = dy - x2o * k;
-  M5.Lcd.drawLine(x1, y1, x2, y2,colour);
-  M5.Lcd.drawLine(x1, y1, dx, dy,colour);
-  M5.Lcd.drawLine(x3, y3, x4, y4,colour);
-  M5.Lcd.drawLine(x3, y3, x2, y2,colour);
-  M5.Lcd.drawLine(x2, y2, x4, y4,colour);
+  tft.drawLine(x1, y1, x2, y2,colour);
+  tft.drawLine(x1, y1, dx, dy,colour);
+  tft.drawLine(x3, y3, x4, y4,colour);
+  tft.drawLine(x3, y3, x2, y2,colour);
+  tft.drawLine(x2, y2, x4, y4,colour);
 } 
 
 void draw_veering_arrow(int a_direction) {
@@ -559,22 +593,22 @@ void draw_veering_arrow(int a_direction) {
 
 void Draw_Compass_Rose() {
   int dxo, dyo, dxi, dyi;
-  M5.Lcd.drawCircle(centreX,centreY,diameter,GREEN);  // Draw compass circle
- // M5.Lcd.fillCircle(centreX,centreY,diameter,GREY);  // Draw compass circle
-  M5.Lcd.drawRoundRect((centreX-45),(centreY-60),(diameter+50),(centreY+diameter/2+50),10,YELLOW); // Draw compass rose
-  M5.Lcd.drawLine(0,105,228,105,YELLOW);   // Seperating line for relative-humidity, temp, windchill, temp-index and dewpoint
-  M5.Lcd.drawLine(132,105,132,185,YELLOW); // Seperating vertical line for relative-humidity, temp, windchill, temp-index and dewpoint
+  tft.drawCircle(centreX,centreY,diameter,GREEN);  // Draw compass circle
+ // tft.fillCircle(centreX,centreY,diameter,GREY);  // Draw compass circle
+  tft.drawRoundRect((centreX-45),(centreY-60),(diameter+50),(centreY+diameter/2+50),10,YELLOW); // Draw compass rose
+  tft.drawLine(0,105,228,105,YELLOW);   // Seperating line for relative-humidity, temp, windchill, temp-index and dewpoint
+  tft.drawLine(132,105,132,185,YELLOW); // Seperating vertical line for relative-humidity, temp, windchill, temp-index and dewpoint
   for (float i = 0; i <360; i = i + 22.5) {
     dxo = diameter * cos((i-90)*3.14/180);
     dyo = diameter * sin((i-90)*3.14/180);
     dxi = dxo * 0.9;
     dyi = dyo * 0.9;
-    M5.Lcd.drawLine(dxo+centreX,dyo+centreY,dxi+centreX,dyi+centreY,YELLOW);   // u8g.drawLine(centreX,centreY,dx,dy); would be the u8g drawing equivalent
+    tft.drawLine(dxo+centreX,dyo+centreY,dxi+centreX,dyi+centreY,YELLOW);   // u8g.drawLine(centreX,centreY,dx,dy); would be the u8g drawing equivalent
     dxo = dxo * 0.5;
     dyo = dyo * 0.5;
     dxi = dxo * 0.9;
     dyi = dyo * 0.9;
-    M5.Lcd.drawLine(dxo+centreX,dyo+centreY,dxi+centreX,dyi+centreY,YELLOW);   // u8g.drawLine(centreX,centreY,dx,dy); would be the u8g drawing equivalent
+    tft.drawLine(dxo+centreX,dyo+centreY,dxi+centreX,dyi+centreY,YELLOW);   // u8g.drawLine(centreX,centreY,dx,dy); would be the u8g drawing equivalent
   }
   display_item((centreX-2),(centreY-33),"N",GREEN,1);
   display_item((centreX-2),(centreY+26),"S",GREEN,1);
@@ -598,24 +632,10 @@ boolean valid_cloud_report(String temp_strA) {
 
 void display_status() {
   display_progress("Initialising",50);
-  M5.Lcd.setTextSize(2); 
+  tft.setTextSize(2); 
   display_progress("Waiting for IP address",75);
   display_progress("Ready...",100);
   clear_screen();
-}
-
-int StartWiFi(const char* ssid, const char* password) {
-  int connAttempts = 0;
-  Serial.print(F("\r\nConnecting to: ")); Serial.println(String(ssid));
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED ) {
-    delay(500); Serial.print(".");
-    if (connAttempts > 20) return -5;
-    connAttempts++;
-  }
-  Serial.print(F("WiFi connected at: "));
-  Serial.println(WiFi.localIP());
-  return 1;
 }
 
 void display_progress (String title, int percent) {
@@ -623,10 +643,10 @@ void display_progress (String title, int percent) {
   int x_pos = 35; int y_pos = 105;
   int bar_width = 250; int bar_height = 15;
   display_item(title_pos,y_pos-20,title,GREEN,2);
-  M5.Lcd.drawRoundRect(x_pos,y_pos,bar_width+2,bar_height,5,YELLOW); // Draw progress bar outline
-  M5.Lcd.fillRoundRect(x_pos+2,y_pos+1,percent*bar_width/100-2,bar_height-3,4,BLUE); // Draw progress
+  tft.drawRoundRect(x_pos,y_pos,bar_width+2,bar_height,5,YELLOW); // Draw progress bar outline
+  tft.fillRoundRect(x_pos+2,y_pos+1,percent*bar_width/100-2,bar_height-3,4,BLUE); // Draw progress
   delay(2000);
-  M5.Lcd.fillRect(x_pos-30,y_pos-20,320,16,BLACK); // Clear titles
+  tft.fillRect(x_pos-30,y_pos-20,320,16,BLACK); // Clear titles
 }
 
 
@@ -727,4 +747,3 @@ void display_progress (String title, int percent) {
 <elevation_m>124.0</elevation_m>
 </METAR>
 */
-
